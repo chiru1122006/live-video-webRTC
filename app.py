@@ -17,7 +17,7 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = 'webrtc-video-secret-key-change-in-production'
 
 # Initialize SocketIO with WebSocket transport
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='gevent')
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
 # In-memory room management
 # Structure: { room_id: { user_id: { 'username': str, 'sid': str } } }
