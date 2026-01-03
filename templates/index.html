@@ -131,7 +131,7 @@
             pointer-events: none;
             opacity: 0.5;
         }
-        
+
         .login-container {
             background: var(--bg-surface);
             padding: var(--space-10) var(--space-10) var(--space-8);
@@ -298,6 +298,107 @@
             cursor: not-allowed;
             transform: none;
             box-shadow: none;
+        }
+
+        /* ========== Low Data Mode Toggle ========== */
+        .data-mode-toggle {
+            margin-bottom: var(--space-5);
+            margin-top: var(--space-2);
+        }
+
+        .toggle-checkbox {
+            display: none;
+        }
+
+        .toggle-label {
+            display: flex;
+            align-items: center;
+            gap: var(--space-3);
+            padding: var(--space-3) var(--space-4);
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-default);
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            transition: all var(--transition-base);
+            position: relative;
+        }
+
+        .toggle-label:hover {
+            background: var(--bg-surface);
+            border-color: var(--border-hover);
+        }
+
+        .toggle-icon {
+            font-size: 20px;
+            opacity: 0.7;
+            transition: all var(--transition-base);
+        }
+
+        .toggle-text {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .toggle-title {
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+
+        .toggle-description {
+            font-size: 12px;
+            color: var(--text-tertiary);
+        }
+
+        /* Toggle switch */
+        .toggle-label::after {
+            content: '';
+            width: 44px;
+            height: 24px;
+            background: var(--bg-overlay);
+            border: 1px solid var(--border-default);
+            border-radius: var(--radius-full);
+            position: relative;
+            transition: all var(--transition-base);
+        }
+
+        .toggle-label::before {
+            content: '';
+            width: 18px;
+            height: 18px;
+            background: var(--text-secondary);
+            border-radius: var(--radius-full);
+            position: absolute;
+            right: 23px;
+            transition: all var(--transition-base);
+            z-index: 1;
+        }
+
+        /* Checked state */
+        .toggle-checkbox:checked + .toggle-label {
+            background: var(--accent-primary-muted);
+            border-color: var(--accent-primary);
+        }
+
+        .toggle-checkbox:checked + .toggle-label .toggle-icon {
+            opacity: 1;
+        }
+
+        .toggle-checkbox:checked + .toggle-label::after {
+            background: var(--accent-primary);
+            border-color: var(--accent-primary);
+        }
+
+        .toggle-checkbox:checked + .toggle-label::before {
+            background: white;
+            right: 4px;
+        }
+
+        .toggle-checkbox:focus-visible + .toggle-label {
+            outline: 2px solid var(--accent-primary);
+            outline-offset: 2px;
         }
 
         /* ============================================
@@ -793,6 +894,17 @@
                     maxlength="30"
                     autocomplete="off"
                 >
+            </div>
+            
+            <div class="data-mode-toggle">
+                <input type="checkbox" id="low-data-mode" class="toggle-checkbox">
+                <label for="low-data-mode" class="toggle-label">
+                    <span class="toggle-icon">📊</span>
+                    <div class="toggle-text">
+                        <span class="toggle-title">Low Data Mode</span>
+                        <span class="toggle-description">Reduce video quality to save bandwidth</span>
+                    </div>
+                </label>
             </div>
             
             <div class="btn-group">
