@@ -235,6 +235,49 @@
             background: #dc2626;
         }
 
+        /* Screen Share Buttons */
+        .screen-share-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 0 20px;
+            height: 48px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        #share-screen-btn {
+            background: #8b5cf6;
+            color: white;
+        }
+
+        #share-screen-btn:hover {
+            background: #7c3aed;
+        }
+
+        #stop-screen-btn {
+            background: var(--danger-color);
+            color: white;
+            display: none;
+        }
+
+        #stop-screen-btn:hover {
+            background: #dc2626;
+        }
+
+        #stop-screen-btn.active {
+            display: flex;
+        }
+
+        #share-screen-btn.hidden {
+            display: none;
+        }
+
         /* ============================================
            Video Grid Styles
            ============================================ */
@@ -294,6 +337,11 @@
 
         .video-tile.local video {
             transform: scaleX(-1); /* Mirror local video */
+        }
+
+        .video-tile.screen video {
+            transform: none; /* Don't mirror screen share */
+            object-fit: contain; /* Fit screen content without cropping */
         }
 
         .video-label {
@@ -506,6 +554,12 @@
                 <button id="toggle-audio-btn" class="control-btn active" title="Toggle Audio">
                     🎤
                 </button>
+                <button id="share-screen-btn" class="screen-share-btn" title="Share Entire Screen">
+                    🖥️ Share Screen
+                </button>
+                <button id="stop-screen-btn" class="screen-share-btn" title="Stop Screen Share">
+                    ⏹️ Stop Sharing
+                </button>
                 <button id="leave-btn" class="control-btn">Leave Room</button>
             </div>
         </header>
@@ -572,6 +626,9 @@
         const state = {
             socket: null,
             localStream: null,
+            screenStream: null,         // Screen capture stream
+            cameraTrack: null,          // Original camera video track (for restoration)
+            isScreenSharing: false,     // Screen sharing active flag
             userId: null,
             username: null,
             roomId: null,
@@ -595,6 +652,8 @@
             leaveBtn: document.getElementById('leave-btn'),
             toggleVideoBtn: document.getElementById('toggle-video-btn'),
             toggleAudioBtn: document.getElementById('toggle-audio-btn'),
+            shareScreenBtn: document.getElementById('share-screen-btn'),
+            stopScreenBtn: document.getElementById('stop-screen-btn'),
             videoGrid: document.getElementById('video-grid'),
             currentRoomName: document.getElementById('current-room-name'),
             userCount: document.getElementById('user-count')
@@ -787,9 +846,18 @@
             });
             
             // Add local tracks to the connection
-            state.localStream.getTracks().forEach(track => {
-                pc.addTrack(track, state.localStream);
-            });
+            // If screen sharing is active, use the screen video track instead of camera
+            const videoTrack = state.isScreenSharing && state.screenStream
+                ? state.screenStream.getVideoTracks()[0]
+                : state.localStream.getVideoTracks()[0];
+            const audioTrack = state.localStream.getAudioTracks()[0];
+            
+            if (videoTrack) {
+                pc.addTrack(videoTrack, state.localStream);
+            }
+            if (audioTrack) {
+                pc.addTrack(audioTrack, state.localStream);
+            }
             
             // Handle ICE candidates
             pc.onicecandidate = (event) => {
@@ -1098,6 +1166,12 @@
             });
             state.peers.clear();
             
+            // Stop screen stream if active
+            if (state.screenStream) {
+                state.screenStream.getTracks().forEach(track => track.stop());
+                state.screenStream = null;
+            }
+            
             // Stop local stream
             if (state.localStream) {
                 state.localStream.getTracks().forEach(track => track.stop());
@@ -1113,12 +1187,16 @@
             state.roomId = null;
             state.isVideoEnabled = true;
             state.isAudioEnabled = true;
+            state.isScreenSharing = false;
+            state.cameraTrack = null;
             
             // Reset UI
             elements.toggleVideoBtn.classList.remove('muted');
             elements.toggleVideoBtn.classList.add('active');
             elements.toggleAudioBtn.classList.remove('muted');
             elements.toggleAudioBtn.classList.add('active');
+            elements.shareScreenBtn.classList.remove('hidden');
+            elements.stopScreenBtn.classList.remove('active');
             
             // Switch back to login screen
             elements.videoRoom.style.display = 'none';
@@ -1166,6 +1244,171 @@
         }
 
         // ============================================
+        // Screen Sharing Functions
+        // ============================================
+
+        /**
+         * Start sharing the entire screen/desktop.
+         * Uses getDisplayMedia() to capture the full system screen.
+         * Replaces the camera video track with the screen track on all peer connections.
+         * Audio continues from the microphone (not replaced).
+         */
+        async function startScreenShare() {
+            if (state.isScreenSharing) {
+                console.log('Already sharing screen');
+                return;
+            }
+
+            try {
+                // Request screen capture - user must select "Entire Screen" in the browser picker
+                // The browser will show a dialog to select: Entire Screen, Window, or Browser Tab
+                // For full desktop sharing, the user must choose "Entire Screen"
+                state.screenStream = await navigator.mediaDevices.getDisplayMedia({
+                    video: {
+                        displaySurface: 'monitor',  // Prefer entire screen
+                        cursor: 'always',           // Show cursor in capture
+                        width: { ideal: 1920, max: 1920 },
+                        height: { ideal: 1080, max: 1080 },
+                        frameRate: { ideal: 30, max: 30 }
+                    },
+                    audio: false  // We keep using microphone audio, not system audio
+                });
+
+                const screenTrack = state.screenStream.getVideoTracks()[0];
+                
+                if (!screenTrack) {
+                    throw new Error('No video track in screen capture');
+                }
+
+                // Store the original camera track for restoration later
+                state.cameraTrack = state.localStream.getVideoTracks()[0];
+
+                // Replace the video track on all peer connections using replaceTrack()
+                // This does NOT renegotiate - it simply swaps the track in place
+                for (const [peerId, peer] of state.peers) {
+                    const senders = peer.pc.getSenders();
+                    const videoSender = senders.find(s => s.track && s.track.kind === 'video');
+                    if (videoSender) {
+                        await videoSender.replaceTrack(screenTrack);
+                        console.log(`Replaced video track for peer ${peerId} with screen track`);
+                    }
+                }
+
+                // Update local video display to show screen share
+                const localVideo = document.getElementById(`video-${state.userId}`);
+                if (localVideo) {
+                    localVideo.srcObject = state.screenStream;
+                }
+
+                // Update local video tile styling (don't mirror screen share)
+                const localTile = document.getElementById(`tile-${state.userId}`);
+                if (localTile) {
+                    localTile.classList.add('screen');
+                    // Update label to indicate screen sharing
+                    const label = localTile.querySelector('.video-label');
+                    if (label) {
+                        label.innerHTML = `
+                            <span>Screen – ${state.username}</span>
+                            <span class="you-badge">You</span>
+                        `;
+                    }
+                }
+
+                state.isScreenSharing = true;
+
+                // Update UI buttons
+                elements.shareScreenBtn.classList.add('hidden');
+                elements.stopScreenBtn.classList.add('active');
+
+                // Handle when user stops sharing via browser's built-in "Stop sharing" button
+                screenTrack.onended = () => {
+                    console.log('Screen sharing stopped by browser control');
+                    stopScreenShare();
+                };
+
+                showStatus('Screen sharing started. Select "Entire Screen" for full desktop.');
+                console.log('Screen sharing started successfully');
+
+            } catch (error) {
+                console.error('Error starting screen share:', error);
+                
+                if (error.name === 'NotAllowedError') {
+                    showStatus('Screen sharing permission denied', 4000);
+                } else if (error.name === 'NotFoundError') {
+                    showStatus('No screen source found', 4000);
+                } else if (error.name === 'AbortError') {
+                    // User cancelled the picker dialog
+                    showStatus('Screen sharing cancelled', 2000);
+                } else {
+                    showStatus('Failed to start screen sharing: ' + error.message, 4000);
+                }
+            }
+        }
+
+        /**
+         * Stop screen sharing and restore the camera video track.
+         * Replaces the screen track back to the camera track on all peer connections.
+         */
+        async function stopScreenShare() {
+            if (!state.isScreenSharing) {
+                return;
+            }
+
+            try {
+                // Stop the screen capture tracks
+                if (state.screenStream) {
+                    state.screenStream.getTracks().forEach(track => track.stop());
+                    state.screenStream = null;
+                }
+
+                // Restore the camera track on all peer connections
+                if (state.cameraTrack) {
+                    for (const [peerId, peer] of state.peers) {
+                        const senders = peer.pc.getSenders();
+                        const videoSender = senders.find(s => s.track && s.track.kind === 'video');
+                        if (videoSender) {
+                            await videoSender.replaceTrack(state.cameraTrack);
+                            console.log(`Restored camera track for peer ${peerId}`);
+                        }
+                    }
+                }
+
+                // Update local video display back to camera
+                const localVideo = document.getElementById(`video-${state.userId}`);
+                if (localVideo) {
+                    localVideo.srcObject = state.localStream;
+                }
+
+                // Restore local video tile styling
+                const localTile = document.getElementById(`tile-${state.userId}`);
+                if (localTile) {
+                    localTile.classList.remove('screen');
+                    // Restore original label
+                    const label = localTile.querySelector('.video-label');
+                    if (label) {
+                        label.innerHTML = `
+                            <span>${state.username}</span>
+                            <span class="you-badge">You</span>
+                        `;
+                    }
+                }
+
+                state.isScreenSharing = false;
+
+                // Update UI buttons
+                elements.shareScreenBtn.classList.remove('hidden');
+                elements.stopScreenBtn.classList.remove('active');
+
+                showStatus('Screen sharing stopped');
+                console.log('Screen sharing stopped, camera restored');
+
+            } catch (error) {
+                console.error('Error stopping screen share:', error);
+                showStatus('Error stopping screen share', 3000);
+            }
+        }
+
+        // ============================================
         // Event Listeners
         // ============================================
         
@@ -1193,6 +1436,12 @@
 
         // Toggle audio button
         elements.toggleAudioBtn.addEventListener('click', toggleAudio);
+
+        // Share screen button
+        elements.shareScreenBtn.addEventListener('click', startScreenShare);
+
+        // Stop screen share button
+        elements.stopScreenBtn.addEventListener('click', stopScreenShare);
 
         // Handle Enter key in inputs
         elements.usernameInput.addEventListener('keypress', (e) => {
